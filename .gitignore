@@ -1,0 +1,13 @@
+/.bundle/
+/vendor/bundle
+/pkg/
+/tmp/
+/coverage/
+Gemfile.lock
+*.gem
+
+# Certificados y secretos — NUNCA versionar
+*.p12
+*.pfx
+*.pem
+*.key
