@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
     (RSA-SHA1) usando un certificado .p12, y lo envía a los web services SOAP de recepción y
     autorización. Por defecto opera en el ambiente de PRUEBAS (1). No depende de Rails.
   DESC
-  spec.homepage = "https://github.com/rysthdesign/sri_facturacion"
+  spec.homepage = "https://github.com/Rysth/GEM_SRI_Facturacion_RUBY"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1.0"
 
