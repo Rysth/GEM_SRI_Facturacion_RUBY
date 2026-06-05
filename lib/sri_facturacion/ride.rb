@@ -76,7 +76,9 @@ module SriFacturacion
       top = pdf.cursor
 
       pdf.bounding_box([0, top], width: issuer_width, height: 122) do
-        pdf.move_down 7 if draw_logo(pdf, emisor, max_width: 110, max_height: 36)
+        if draw_logo(pdf, emisor, max_width: 110, max_height: 34)
+          pdf.move_down 40
+        end
 
         pdf.fill_color INK
         pdf.text safe_upcase(emisor.razon_social), size: 15, style: :bold, leading: 1
@@ -121,7 +123,7 @@ module SriFacturacion
       return unless logo_present?(emisor)
       return unless supported_logo?(emisor)
 
-      pdf.image StringIO.new(emisor.logo_data), fit: [max_width, max_height]
+      pdf.image StringIO.new(emisor.logo_data), fit: [max_width, max_height], at: [0, pdf.cursor]
       true
     rescue StandardError
       nil
@@ -315,13 +317,15 @@ module SriFacturacion
 
     def draw_footer(pdf)
       pdf.repeat(:all) do
-        pdf.bounding_box([0, 24], width: pdf.bounds.width, height: 22) do
-          pdf.stroke_color BORDER
-          pdf.stroke_horizontal_rule
-          pdf.move_down 6
-          pdf.fill_color MUTED
-          pdf.text "RIDE generado por StockManager by RysthDesign  ·  www.rysthdesign.com",
-                   size: 7, align: :center
+        pdf.canvas do
+          pdf.bounding_box([pdf.bounds.left, pdf.bounds.bottom + 24], width: pdf.bounds.width, height: 22) do
+            pdf.stroke_color BORDER
+            pdf.stroke_horizontal_rule
+            pdf.move_down 6
+            pdf.fill_color MUTED
+            pdf.text "RIDE generado por StockManager by RysthDesign  ·  www.rysthdesign.com",
+                     size: 7, align: :center
+          end
         end
       end
     end
