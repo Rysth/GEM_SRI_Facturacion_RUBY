@@ -320,7 +320,7 @@ module SriFacturacion
           pdf.stroke_horizontal_rule
           pdf.move_down 6
           pdf.fill_color MUTED
-          pdf.text "RIDE generado por SriFacturacion · www.rysthdesign.com",
+          pdf.text "RIDE generado por StockManager by RysthDesign  ·  www.rysthdesign.com",
                    size: 7, align: :center
         end
       end
