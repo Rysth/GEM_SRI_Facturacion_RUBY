@@ -76,6 +76,8 @@ module SriFacturacion
       top = pdf.cursor
 
       pdf.bounding_box([0, top], width: issuer_width, height: 122) do
+        pdf.move_down 7 if draw_logo(pdf, emisor, max_width: 110, max_height: 36)
+
         pdf.fill_color INK
         pdf.text safe_upcase(emisor.razon_social), size: 15, style: :bold, leading: 1
 
@@ -113,6 +115,24 @@ module SriFacturacion
       end
 
       pdf.move_cursor_to top - 136
+    end
+
+    def draw_logo(pdf, emisor, max_width:, max_height:)
+      return unless logo_present?(emisor)
+      return unless supported_logo?(emisor)
+
+      pdf.image StringIO.new(emisor.logo_data), fit: [max_width, max_height]
+      true
+    rescue StandardError
+      nil
+    end
+
+    def logo_present?(emisor)
+      emisor.respond_to?(:logo_data) && present?(emisor.logo_data)
+    end
+
+    def supported_logo?(emisor)
+      %w[image/png image/jpeg image/jpg].include?(emisor.logo_content_type.to_s.downcase)
     end
 
     def draw_authorization_panel(pdf)

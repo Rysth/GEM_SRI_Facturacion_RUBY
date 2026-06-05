@@ -9,11 +9,12 @@ module SriFacturacion
     class Emisor
       attr_reader :ruc, :razon_social, :nombre_comercial, :dir_matriz, :dir_establecimiento,
                   :establecimiento, :punto_emision, :obligado_contabilidad, :contribuyente_especial,
-                  :agente_retencion, :contribuyente_rimpe
+                  :agente_retencion, :contribuyente_rimpe, :logo_data, :logo_content_type
 
       def initialize(ruc:, razon_social:, dir_matriz:, establecimiento: "001", punto_emision: "001",
-                     nombre_comercial: nil, dir_establecimiento: nil, obligado_contabilidad: "NO",
-                     contribuyente_especial: nil, agente_retencion: nil, contribuyente_rimpe: nil)
+                      nombre_comercial: nil, dir_establecimiento: nil, obligado_contabilidad: "NO",
+                      contribuyente_especial: nil, agente_retencion: nil, contribuyente_rimpe: nil,
+                      logo_data: nil, logo_content_type: nil)
         @ruc = ruc.to_s
         @razon_social = razon_social
         @nombre_comercial = nombre_comercial
@@ -25,6 +26,8 @@ module SriFacturacion
         @contribuyente_especial = contribuyente_especial
         @agente_retencion = agente_retencion
         @contribuyente_rimpe = contribuyente_rimpe
+        @logo_data = logo_data
+        @logo_content_type = logo_content_type
       end
     end
 
