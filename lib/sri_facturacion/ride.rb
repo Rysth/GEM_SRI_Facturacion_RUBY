@@ -49,7 +49,6 @@ module SriFacturacion
         Prawn::Fonts::AFM.hide_m17n_warning = true if defined?(Prawn::Fonts::AFM)
         pdf.font "Helvetica"
 
-        draw_footer(pdf)
         draw_header(pdf)
         draw_authorization_panel(pdf)
         draw_buyer_panel(pdf)
@@ -57,6 +56,7 @@ module SriFacturacion
         draw_totals_and_payments(pdf)
         draw_additional_info(pdf)
         draw_page_numbers(pdf)
+        stamp_footers(pdf)
       end.render
     end
 
@@ -76,9 +76,7 @@ module SriFacturacion
       top = pdf.cursor
 
       pdf.bounding_box([0, top], width: issuer_width, height: 122) do
-        if draw_logo(pdf, emisor, max_width: 110, max_height: 34)
-          pdf.move_down 40
-        end
+        draw_logo(pdf, emisor, max_width: 110, max_height: 34)
 
         pdf.fill_color INK
         pdf.text safe_upcase(emisor.razon_social), size: 15, style: :bold, leading: 1
@@ -123,8 +121,10 @@ module SriFacturacion
       return unless logo_present?(emisor)
       return unless supported_logo?(emisor)
 
-      pdf.image StringIO.new(emisor.logo_data), fit: [max_width, max_height], at: [0, pdf.cursor]
-      true
+      top = pdf.cursor
+      pdf.image StringIO.new(emisor.logo_data), fit: [max_width, max_height], position: :left
+      used = top - pdf.cursor
+      pdf.move_down [max_height - used, 4].max
     rescue StandardError
       nil
     end
@@ -315,10 +315,12 @@ module SriFacturacion
       end
     end
 
-    def draw_footer(pdf)
-      pdf.repeat(:all) do
-        pdf.canvas do
-          pdf.bounding_box([pdf.bounds.left, pdf.bounds.bottom + 24], width: pdf.bounds.width, height: 22) do
+    def stamp_footers(pdf)
+      pdf.canvas do
+        (1..pdf.page_count).each do |page_num|
+          pdf.go_to_page(page_num)
+          y = pdf.bounds.bottom + 24
+          pdf.bounding_box([pdf.bounds.left, y], width: pdf.bounds.width, height: 22) do
             pdf.stroke_color BORDER
             pdf.stroke_horizontal_rule
             pdf.move_down 6
