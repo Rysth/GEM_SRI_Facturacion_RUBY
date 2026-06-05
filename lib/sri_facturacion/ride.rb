@@ -3,268 +3,430 @@
 require "prawn"
 require "prawn/table"
 require "rqrcode"
+require "date"
+require "stringio"
+require "time"
 
 module SriFacturacion
-  # Genera el RIDE (Representación Impresa del Documento Electrónico) en PDF.
-  # PDF en Ruby puro con Prawn; QR con la clave de acceso vía rqrcode.
+  # Genera el RIDE (Representacion Impresa del Documento Electronico) en PDF.
+  # PDF en Ruby puro con Prawn; QR con URL verificable o datos clave del comprobante.
   class Ride
-    NAVY   = "0F2742"
-    BLUE   = "2563EB"
-    GREEN  = "15803D"
-    GRAY   = "64748B"
-    LIGHT  = "F1F5F9"
-    ZEBRA  = "F8FAFC"
-    BORDER = "CBD5E1"
-    ACCENT = "EFF6FF" # fondo sección cliente
+    INK = "111827"
+    MUTED = "64748B"
+    BORDER = "D1D5DB"
+    SOFT = "F8FAFC"
+    PANEL = "F1F5F9"
+    DARK = "0F172A"
+    BLUE = "1D4ED8"
+    GREEN = "15803D"
+    AMBER = "B45309"
+    WHITE = "FFFFFF"
 
-    def initialize(factura, clave_acceso:, numero_autorizacion: nil, fecha_autorizacion: nil, ambiente: "1")
+    PAYMENT_LABELS = {
+      "01" => "Sin utilizacion del sistema financiero",
+      "15" => "Compensacion de deudas",
+      "16" => "Tarjeta de debito",
+      "17" => "Dinero electronico",
+      "18" => "Tarjeta prepago",
+      "19" => "Tarjeta de credito",
+      "20" => "Otros con utilizacion del sistema financiero",
+      "21" => "Endoso de titulos"
+    }.freeze
+
+    def initialize(factura, clave_acceso:, numero_autorizacion: nil, fecha_autorizacion: nil, ambiente: "1",
+                   verification_url: nil, qr_content: nil)
       @factura = factura
-      @clave_acceso = clave_acceso
+      @clave_acceso = clave_acceso.to_s
       @numero_autorizacion = numero_autorizacion
       @fecha_autorizacion = fecha_autorizacion
       @ambiente = ambiente.to_s
+      @verification_url = verification_url
+      @qr_content = qr_content
     end
 
     def render
-      f = @factura
-      emisor    = f.emisor
-      comprador = f.comprador
-      totales   = f.totales
-
-      Prawn::Document.new(page_size: "A4", margin: 36) do |pdf|
+      Prawn::Document.new(page_size: "A4", margin: [28, 32, 42, 32]) do |pdf|
         Prawn::Fonts::AFM.hide_m17n_warning = true if defined?(Prawn::Fonts::AFM)
-        full_width = pdf.bounds.width
+        pdf.font "Helvetica"
 
-        # ── Banda de acento superior ──────────────────────────────────────
-        pdf.fill_color NAVY
-        pdf.fill_rectangle [0, pdf.cursor], full_width, 6
-        pdf.move_down 20
-
-        # ── Encabezado: Emisor (izq) + Caja FACTURA (der) ────────────────
-        header_top = pdf.cursor
-        box_w  = 202
-        box_h  = 128
-
-        pdf.bounding_box([0, header_top], width: full_width - box_w - 16, height: box_h) do
-          pdf.fill_color NAVY
-          pdf.text emisor.razon_social.to_s.upcase, size: 16, style: :bold, leading: 2
-          if emisor.nombre_comercial.to_s.strip.length > 0 && emisor.nombre_comercial != emisor.razon_social
-            pdf.fill_color BLUE
-            pdf.text emisor.nombre_comercial.to_s, size: 10, style: :bold
-          end
-          pdf.move_down 6
-          pdf.fill_color GRAY
-          pdf.text "RUC: #{emisor.ruc}", size: 9, style: :bold
-          pdf.text emisor.dir_matriz.to_s, size: 9 if emisor.dir_matriz.to_s.length > 0
-          if emisor.dir_establecimiento.to_s.length > 0 && emisor.dir_establecimiento != emisor.dir_matriz
-            pdf.text "Sucursal: #{emisor.dir_establecimiento}", size: 8
-          end
-          pdf.text "Obligado a llevar contabilidad: #{emisor.obligado_contabilidad}", size: 8 if emisor.obligado_contabilidad.to_s.length > 0
-          pdf.text "Contribuyente especial Nro: #{emisor.contribuyente_especial}", size: 8 if emisor.contribuyente_especial.to_s.strip.length > 0
-          pdf.text emisor.contribuyente_rimpe.to_s, size: 8 if emisor.contribuyente_rimpe.to_s.strip.length > 0
-        end
-
-        # Caja FACTURA
-        pdf.bounding_box([full_width - box_w, header_top], width: box_w, height: box_h) do
-          pdf.fill_color LIGHT
-          pdf.fill_rounded_rectangle [0, box_h], box_w, box_h, 8
-          pdf.stroke_color BORDER
-          pdf.line_width 0.75
-          pdf.stroke_rounded_rectangle [0, box_h], box_w, box_h, 8
-
-          pad   = 14
-          inner = box_w - (pad * 2)
-
-          # Título FACTURA
-          pdf.fill_color NAVY
-          pdf.text_box "FACTURA", at: [pad, box_h - 12], width: inner, size: 16, style: :bold
-
-          # Separador interior
-          pdf.stroke_color BORDER
-          pdf.line_width 0.5
-          pdf.stroke do
-            pdf.move_to  pad, box_h - 26
-            pdf.line_to  box_w - pad, box_h - 26
-          end
-
-          # No. Comprobante
-          pdf.fill_color GRAY
-          pdf.text_box "No. Comprobante", at: [pad, box_h - 35], width: inner, size: 7
-          pdf.fill_color "000000"
-          pdf.text_box "#{emisor.establecimiento}-#{emisor.punto_emision}-#{f.secuencial}",
-                       at: [pad, box_h - 47], width: inner, size: 11, style: :bold
-
-          # Ambiente y fecha
-          pdf.fill_color GRAY
-          pdf.text_box "Ambiente: #{@ambiente == '2' ? 'PRODUCCION' : 'PRUEBAS'}",
-                       at: [pad, box_h - 70], width: inner, size: 8
-          pdf.text_box "Fecha de emision: #{format_fecha(f.fecha_emision)}",
-                       at: [pad, box_h - 83], width: inner, size: 8
-
-          # Badge AUTORIZADO
-          pdf.fill_color GREEN
-          pdf.fill_rounded_rectangle [pad, box_h - 97], inner, 20, 4
-          pdf.fill_color "FFFFFF"
-          pdf.text_box "DOCUMENTO AUTORIZADO",
-                       at: [pad, box_h - 101], width: inner, size: 8.5, style: :bold, align: :center
-        end
-
-        # Línea separadora
-        pdf.move_cursor_to header_top - box_h - 14
-        pdf.stroke_color BORDER
-        pdf.line_width 0.5
-        pdf.stroke_horizontal_rule
-        pdf.move_down 14
-
-        # ── Sección Cliente + Claves + QR ────────────────────────────────
-        info_top = pdf.cursor
-        qr_size  = 106
-        text_w   = full_width - qr_size - 14
-
-        # Fondo sutil para el bloque de cliente
-        pdf.fill_color ACCENT
-        pdf.fill_rounded_rectangle [0, info_top + 2], full_width, qr_size + 4, 6
-        pdf.fill_color "000000"
-
-        # Bloque de texto: cliente + claves
-        pdf.bounding_box([8, info_top - 2], width: text_w - 8, height: qr_size) do
-          pdf.fill_color NAVY
-          pdf.text "DATOS DEL COMPRADOR", size: 7.5, style: :bold
-          pdf.move_down 4
-          pdf.fill_color NAVY
-          pdf.text comprador.razon_social.to_s, size: 12, style: :bold
-          pdf.fill_color "000000"
-          pdf.text "Identificacion: #{comprador.identificacion}", size: 9
-          pdf.text "Direccion: #{comprador.direccion}", size: 9 if comprador.direccion.to_s.length > 0
-          pdf.move_down 5
-
-          # Claves en dos columnas
-          half = (text_w - 8) / 2
-          cur  = pdf.cursor
-          pdf.bounding_box([0, cur], width: half - 4) do
-            pdf.fill_color NAVY
-            pdf.text "NUMERO DE AUTORIZACION", size: 7, style: :bold
-            pdf.fill_color "000000"
-            pdf.text (@numero_autorizacion || @clave_acceso).to_s, size: 7
-          end
-          pdf.bounding_box([half, cur], width: half) do
-            pdf.fill_color NAVY
-            pdf.text "CLAVE DE ACCESO", size: 7, style: :bold
-            pdf.fill_color "000000"
-            pdf.text @clave_acceso.to_s, size: 7
-          end
-        end
-
-        # QR
-        pdf.bounding_box([full_width - qr_size, info_top], width: qr_size, height: qr_size) do
-          pdf.fill_color "FFFFFF"
-          pdf.fill_rounded_rectangle [2, qr_size], qr_size - 4, qr_size, 6
-          pdf.stroke_color BORDER
-          pdf.line_width 0.75
-          pdf.stroke_rounded_rectangle [2, qr_size], qr_size - 4, qr_size, 6
-          pdf.image qr_png_io(@clave_acceso), width: qr_size - 20, at: [10, qr_size - 8]
-        end
-
-        pdf.move_cursor_to info_top - qr_size - 16
-        pdf.fill_color "000000"
-
-        # ── Tabla de detalle ──────────────────────────────────────────────
-        table_width = pdf.bounds.width
-        # Columnas: SKU, Descripción, Cant., P.Unit., Desc., Total
-        # SKU puede tener hasta ~15 chars (NIK-36-GRIS-C7B6) — le damos más espacio
-        sku_w  = 70
-        qty_w  = 44
-        pu_w   = 58
-        dsc_w  = 48
-        tot_w  = 52
-        desc_w = table_width - sku_w - qty_w - pu_w - dsc_w - tot_w
-
-        rows = [["CODIGO", "DESCRIPCION", "CANT.", "P. UNIT.", "DESC.", "TOTAL"]]
-        f.detalles.each do |d|
-          rows << [
-            d.codigo_principal.to_s,
-            d.descripcion.to_s,
-            fmt(d.cantidad),
-            fmt(d.precio_unitario),
-            fmt(d.descuento),
-            fmt(d.precio_total_sin_impuesto)
-          ]
-        end
-
-        pdf.table(rows, header: true, width: table_width,
-                        cell_style: { size: 8, padding: [6, 7], border_width: 0.4, border_color: BORDER },
-                        column_widths: [sku_w, desc_w, qty_w, pu_w, dsc_w, tot_w]) do
-          row(0).font_style    = :bold
-          row(0).background_color = NAVY
-          row(0).text_color    = "FFFFFF"
-          row(0).size          = 7.5
-          row(0).padding       = [7, 7]
-          columns(2..5).align  = :right
-          columns(0).overflow  = :shrink_to_fit
-          columns(0).min_font_size = 6.5
-          (1...rows.length).each do |i|
-            row(i).background_color = ZEBRA if i.even?
-          end
-        end
-
-        # ── Totales ───────────────────────────────────────────────────────
-        pdf.move_down 16
-        totals_rows = [
-          ["Subtotal sin impuestos", "$#{fmt(totales.total_sin_impuestos)}"],
-          ["Descuento",              "$#{fmt(totales.total_descuento)}"]
-        ]
-        totales.total_con_impuestos.each do |imp|
-          totals_rows << ["IVA #{imp.tarifa.to_i}%", "$#{fmt(imp.valor)}"]
-        end
-        totals_rows << ["VALOR TOTAL", "$#{fmt(totales.importe_total)}"]
-
-        totals_w = 245
-        pdf.bounding_box([table_width - totals_w, pdf.cursor], width: totals_w) do
-          pdf.table(totals_rows, width: totals_w,
-                                 cell_style: { size: 9, padding: [6, 10], border_width: 0.4, border_color: BORDER },
-                                 column_widths: [155, 90]) do
-            columns(0).align = :left
-            columns(1).align = :right
-            (0...-1).each do |i|
-              row(i).background_color = ZEBRA if i.even?
-            end
-            row(-1).font_style       = :bold
-            row(-1).size             = 11
-            row(-1).background_color = NAVY
-            row(-1).text_color       = "FFFFFF"
-            row(-1).padding          = [8, 10]
-          end
-        end
-
-        # ── Pie de página ─────────────────────────────────────────────────
-        pdf.repeat(:all) do
-          pdf.bounding_box([0, 30], width: pdf.bounds.width, height: 22) do
-            pdf.fill_color NAVY
-            pdf.fill_rectangle [0, 1], pdf.bounds.width, 1
-            pdf.move_down 7
-            pdf.fill_color GRAY
-            pdf.text "RIDE generado por StockManager by RysthDesign  ·  www.rysthdesign.com",
-                     size: 7.5, align: :center
-          end
-        end
+        draw_footer(pdf)
+        draw_header(pdf)
+        draw_authorization_panel(pdf)
+        draw_buyer_panel(pdf)
+        draw_details_table(pdf)
+        draw_totals_and_payments(pdf)
+        draw_additional_info(pdf)
+        draw_page_numbers(pdf)
       end.render
     end
 
     private
 
+    def draw_header(pdf)
+      emisor = @factura.emisor
+      number = document_number
+      top = pdf.cursor
+      full_width = pdf.bounds.width
+      document_box_width = 205
+      issuer_width = full_width - document_box_width - 18
+
+      pdf.fill_color DARK
+      pdf.fill_rectangle [0, top], full_width, 5
+      pdf.move_down 18
+      top = pdf.cursor
+
+      pdf.bounding_box([0, top], width: issuer_width, height: 122) do
+        pdf.fill_color INK
+        pdf.text safe_upcase(emisor.razon_social), size: 15, style: :bold, leading: 1
+
+        if present?(emisor.nombre_comercial) && emisor.nombre_comercial.to_s != emisor.razon_social.to_s
+          pdf.move_down 2
+          pdf.fill_color BLUE
+          pdf.text emisor.nombre_comercial.to_s, size: 10, style: :bold
+        end
+
+        pdf.move_down 8
+        key_value(pdf, "RUC", emisor.ruc)
+        key_value(pdf, "Direccion matriz", emisor.dir_matriz)
+        key_value(pdf, "Direccion establecimiento", emisor.dir_establecimiento) if present?(emisor.dir_establecimiento)
+        key_value(pdf, "Obligado contabilidad", emisor.obligado_contabilidad) if present?(emisor.obligado_contabilidad)
+        key_value(pdf, "Contribuyente especial", emisor.contribuyente_especial) if present?(emisor.contribuyente_especial)
+        pdf.fill_color MUTED
+        pdf.text emisor.contribuyente_rimpe.to_s, size: 8 if present?(emisor.contribuyente_rimpe)
+      end
+
+      pdf.bounding_box([full_width - document_box_width, top], width: document_box_width, height: 122) do
+        rounded_panel(pdf, document_box_width, 122, fill: PANEL)
+        pdf.move_down 12
+        pdf.indent(13, 13) do
+          pdf.fill_color DARK
+          pdf.text "FACTURA", size: 19, style: :bold, align: :right
+          pdf.fill_color MUTED
+          pdf.text "No. #{number}", size: 10, style: :bold, align: :right
+          pdf.move_down 10
+          badge(pdf, ambiente_label, @ambiente == "2" ? GREEN : AMBER)
+          pdf.move_down 9
+          key_value(pdf, "Fecha emision", format_fecha(@factura.fecha_emision), label_width: 78, size: 8.3)
+          key_value(pdf, "Tipo emision", @factura.tipo_emision, label_width: 78, size: 8.3)
+          key_value(pdf, "Moneda", @factura.moneda, label_width: 78, size: 8.3)
+        end
+      end
+
+      pdf.move_cursor_to top - 136
+    end
+
+    def draw_authorization_panel(pdf)
+      full_width = pdf.bounds.width
+      qr_size = 92
+      panel_height = 120
+      top = pdf.cursor
+
+      rounded_panel(pdf, full_width, panel_height, fill: WHITE)
+
+      pdf.bounding_box([12, top - 12], width: full_width - qr_size - 34, height: panel_height - 24) do
+        section_label(pdf, "AUTORIZACION SRI")
+        key_value(pdf, "Estado", "DOCUMENTO AUTORIZADO", label_width: 98, value_color: GREEN, bold_value: true)
+        key_value(pdf, "Numero autorizacion", authorization_number, label_width: 98, size: 7.4)
+        key_value(pdf, "Fecha autorizacion", format_datetime(@fecha_autorizacion), label_width: 98)
+        pdf.move_down 5
+        pdf.fill_color MUTED
+        pdf.text "Clave de acceso", size: 7.5, style: :bold
+        pdf.fill_color INK
+        pdf.text @clave_acceso, size: 8, style: :bold, character_spacing: 0.2
+      end
+
+      pdf.bounding_box([full_width - qr_size - 12, top - 12], width: qr_size, height: qr_size + 16) do
+        pdf.fill_color SOFT
+        pdf.fill_rounded_rectangle [0, qr_size + 12], qr_size, qr_size + 12, 5
+        pdf.stroke_color BORDER
+        pdf.stroke_rounded_rectangle [0, qr_size + 12], qr_size, qr_size + 12, 5
+        pdf.image qr_png_io(qr_payload), width: qr_size - 16, at: [8, qr_size + 4]
+        pdf.fill_color MUTED
+        pdf.text_box "Verificacion", at: [0, 10], width: qr_size, height: 9, size: 6.5, align: :center
+      end
+
+      pdf.move_cursor_to top - panel_height - 14
+    end
+
+    def draw_buyer_panel(pdf)
+      comprador = @factura.comprador
+      full_width = pdf.bounds.width
+      top = pdf.cursor
+      panel_height = 84
+
+      pdf.fill_color SOFT
+      pdf.fill_rounded_rectangle [0, top], full_width, panel_height, 6
+      pdf.stroke_color BORDER
+      pdf.stroke_rounded_rectangle [0, top], full_width, panel_height, 6
+
+      pdf.bounding_box([12, top - 11], width: full_width - 24, height: panel_height - 18) do
+        section_label(pdf, "DATOS DEL COMPRADOR")
+        left_width = (full_width - 34) * 0.55
+        right_width = full_width - 34 - left_width
+        current = pdf.cursor
+
+        pdf.bounding_box([0, current], width: left_width, height: 48) do
+          key_value(pdf, "Razon social", comprador.razon_social, label_width: 82)
+          key_value(pdf, "Identificacion", comprador.identificacion, label_width: 82)
+          key_value(pdf, "Direccion", comprador.direccion, label_width: 82) if present?(comprador.direccion)
+        end
+
+        pdf.bounding_box([left_width + 10, current], width: right_width, height: 48) do
+          key_value(pdf, "Email", comprador.email, label_width: 58) if present?(comprador.email)
+          key_value(pdf, "Telefono", comprador.telefono, label_width: 58) if present?(comprador.telefono)
+          key_value(pdf, "Fecha", format_fecha(@factura.fecha_emision), label_width: 58)
+        end
+      end
+
+      pdf.move_cursor_to top - panel_height - 14
+    end
+
+    def draw_details_table(pdf)
+      pdf.fill_color DARK
+      pdf.text "DETALLE DE LA FACTURA", size: 9, style: :bold
+      pdf.move_down 6
+
+      table_width = pdf.bounds.width
+      code_w = 67
+      qty_w = 42
+      unit_w = 58
+      discount_w = 48
+      total_w = 58
+      desc_w = table_width - code_w - qty_w - unit_w - discount_w - total_w
+
+      rows = [["Codigo", "Descripcion", "Cant.", "P. Unit.", "Desc.", "Subtotal"]]
+      @factura.detalles.each do |detail|
+        rows << [
+          detail.codigo_principal.to_s,
+          detail.descripcion.to_s,
+          fmt(detail.cantidad),
+          money(detail.precio_unitario),
+          money(detail.descuento),
+          money(detail.precio_total_sin_impuesto)
+        ]
+      end
+
+      pdf.table(rows, header: true, width: table_width,
+                      cell_style: { size: 7.8, padding: [6, 6], border_width: 0.35, border_color: BORDER },
+                      column_widths: [code_w, desc_w, qty_w, unit_w, discount_w, total_w]) do
+        row(0).background_color = DARK
+        row(0).text_color = WHITE
+        row(0).font_style = :bold
+        row(0).size = 7.3
+        columns(2..5).align = :right
+        columns(0).overflow = :shrink_to_fit
+        columns(0).min_font_size = 5.8
+        columns(1).overflow = :shrink_to_fit
+        columns(1).min_font_size = 6.2
+        (1...rows.length).each { |index| row(index).background_color = SOFT if index.even? }
+      end
+    end
+
+    def draw_totals_and_payments(pdf)
+      pdf.move_down 14
+      full_width = pdf.bounds.width
+      payments_width = full_width - 255 - 18
+      totals_width = 255
+      top = pdf.cursor
+
+      pdf.bounding_box([0, top], width: payments_width) do
+        section_label(pdf, "FORMA DE PAGO")
+        payment_rows = @factura.pagos.map do |payment|
+          [payment_label(payment.forma_pago), money(payment.total)]
+        end
+        payment_rows = [["No especificada", money(@factura.totales.importe_total)]] if payment_rows.empty?
+
+        pdf.table(payment_rows, width: payments_width,
+                              cell_style: { size: 8, padding: [6, 7], border_width: 0.35, border_color: BORDER },
+                              column_widths: [payments_width - 76, 76]) do
+          columns(1).align = :right
+          columns(1).font_style = :bold
+        end
+      end
+
+      pdf.bounding_box([full_width - totals_width, top], width: totals_width) do
+        totals = @factura.totales
+        rows = [
+          ["Subtotal sin impuestos", money(totals.total_sin_impuestos)],
+          ["Descuento", money(totals.total_descuento)]
+        ]
+        totals.total_con_impuestos.each do |tax|
+          rows << ["IVA #{fmt(tax.tarifa)}%", money(tax.valor)]
+        end
+        rows << ["VALOR TOTAL", money(totals.importe_total)]
+
+        pdf.table(rows, width: totals_width,
+                        cell_style: { size: 8.5, padding: [6, 8], border_width: 0.35, border_color: BORDER },
+                        column_widths: [158, 97]) do
+          columns(1).align = :right
+          columns(1).font_style = :bold
+          (0...rows.length - 1).each { |index| row(index).background_color = SOFT if index.even? }
+          row(-1).background_color = DARK
+          row(-1).text_color = WHITE
+          row(-1).font_style = :bold
+          row(-1).size = 10.5
+          row(-1).padding = [8, 8]
+        end
+      end
+
+      pdf.move_cursor_to [pdf.cursor, top - 88].min
+    end
+
+    def draw_additional_info(pdf)
+      return unless @factura.info_adicional.respond_to?(:any?) && @factura.info_adicional.any?
+
+      pdf.move_down 10
+      section_label(pdf, "INFORMACION ADICIONAL")
+      rows = @factura.info_adicional.map do |item|
+        if item.respond_to?(:fetch)
+          [item[:nombre] || item["nombre"], item[:valor] || item["valor"]]
+        else
+          ["Info", item.to_s]
+        end
+      end
+
+      pdf.table(rows, width: pdf.bounds.width,
+                      cell_style: { size: 8, padding: [5, 7], border_width: 0.35, border_color: BORDER },
+                      column_widths: [120, pdf.bounds.width - 120]) do
+        columns(0).font_style = :bold
+        columns(0).text_color = MUTED
+      end
+    end
+
+    def draw_footer(pdf)
+      pdf.repeat(:all) do
+        pdf.bounding_box([0, 24], width: pdf.bounds.width, height: 22) do
+          pdf.stroke_color BORDER
+          pdf.stroke_horizontal_rule
+          pdf.move_down 6
+          pdf.fill_color MUTED
+          pdf.text "RIDE generado por SriFacturacion · www.rysthdesign.com",
+                   size: 7, align: :center
+        end
+      end
+    end
+
+    def draw_page_numbers(pdf)
+      pdf.number_pages "Pagina <page> de <total>", at: [pdf.bounds.right - 76, 16], width: 76,
+                                                   size: 7, align: :right, color: MUTED
+    end
+
+    def rounded_panel(pdf, width, height, fill: SOFT)
+      top = pdf.cursor
+      pdf.fill_color fill
+      pdf.fill_rounded_rectangle [0, top], width, height, 6
+      pdf.stroke_color BORDER
+      pdf.line_width 0.6
+      pdf.stroke_rounded_rectangle [0, top], width, height, 6
+    end
+
+    def badge(pdf, text, color)
+      pdf.fill_color color
+      pdf.fill_rounded_rectangle [0, pdf.cursor], 176, 18, 4
+      pdf.fill_color WHITE
+      pdf.text_box text, at: [0, pdf.cursor - 4], width: 176, height: 12, size: 8, style: :bold, align: :center
+      pdf.move_down 18
+    end
+
+    def section_label(pdf, text)
+      pdf.fill_color DARK
+      pdf.text text, size: 7.8, style: :bold, character_spacing: 0.4
+      pdf.move_down 5
+    end
+
+    def key_value(pdf, label, value, label_width: 92, size: 8.5, value_color: INK, bold_value: false)
+      return unless present?(value)
+
+      y = pdf.cursor
+      pdf.fill_color MUTED
+      pdf.text_box "#{label}:", at: [0, y], width: label_width, height: 12, size: size, style: :bold
+      pdf.fill_color value_color
+      pdf.text_box value.to_s, at: [label_width, y], width: pdf.bounds.width - label_width, height: 16,
+                             size: size, style: bold_value ? :bold : :normal, overflow: :shrink_to_fit,
+                             min_font_size: 6
+      pdf.move_down 12
+    end
+
     def qr_png_io(content)
-      qr  = RQRCode::QRCode.new(content)
-      png = qr.as_png(size: 220, border_modules: 2)
+      qr = RQRCode::QRCode.new(content.to_s)
+      png = qr.as_png(size: 260, border_modules: 2)
       StringIO.new(png.to_s)
     end
 
-    def fmt(value)
+    def qr_payload
+      return @qr_content.to_s if present?(@qr_content)
+      return verification_url if present?(@verification_url)
+
+      [
+        "RIDE FACTURA",
+        "RUC=#{@factura.emisor.ruc}",
+        "COMPROBANTE=#{document_number}",
+        "CLAVE=#{@clave_acceso}",
+        "AUTORIZACION=#{authorization_number}",
+        "FECHA=#{format_fecha(@factura.fecha_emision)}",
+        "TOTAL=#{amount(@factura.totales.importe_total)}",
+        "AMBIENTE=#{ambiente_label}"
+      ].join("\n")
+    end
+
+    def verification_url
+      base = @verification_url.to_s.strip.sub(%r{/+\z}, "")
+      "#{base}/#{@clave_acceso}"
+    end
+
+    def document_number
+      emisor = @factura.emisor
+      "#{emisor.establecimiento}-#{emisor.punto_emision}-#{@factura.secuencial}"
+    end
+
+    def authorization_number
+      (@numero_autorizacion || @clave_acceso).to_s
+    end
+
+    def ambiente_label
+      @ambiente == "2" ? "PRODUCCION" : "PRUEBAS"
+    end
+
+    def payment_label(code)
+      code = code.to_s
+      PAYMENT_LABELS.fetch(code, "Forma de pago #{code}")
+    end
+
+    def money(value)
+      "$#{amount(value)}"
+    end
+
+    def amount(value)
       format("%.2f", value.to_f)
     end
 
+    def fmt(value)
+      number = value.to_f
+      number == number.to_i ? format("%d", number) : format("%.2f", number)
+    end
+
     def format_fecha(date)
-      d = date.respond_to?(:to_date) ? date.to_date : date
+      d = date.respond_to?(:to_date) ? date.to_date : Date.parse(date.to_s)
       format("%02d/%02d/%04d", d.day, d.month, d.year)
+    rescue StandardError
+      date.to_s
+    end
+
+    def format_datetime(value)
+      return "" unless present?(value)
+
+      time = Time.parse(value.to_s)
+      time.strftime("%d/%m/%Y %H:%M:%S")
+    rescue StandardError
+      value.to_s
+    end
+
+    def present?(value)
+      !value.nil? && value.to_s.strip != ""
+    end
+
+    def safe_upcase(value)
+      value.to_s.upcase
     end
   end
 end

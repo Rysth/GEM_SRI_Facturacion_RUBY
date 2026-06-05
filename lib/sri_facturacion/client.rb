@@ -39,9 +39,10 @@ module SriFacturacion
 
       if result.autorizado? && generar_ride
         pdf = Ride.new(factura, clave_acceso: clave_acceso,
-                                numero_autorizacion: result.numero_autorizacion,
-                                fecha_autorizacion: result.fecha_autorizacion,
-                                ambiente: ambiente).render
+                                 numero_autorizacion: result.numero_autorizacion,
+                                 fecha_autorizacion: result.fecha_autorizacion,
+                                 ambiente: ambiente,
+                                 verification_url: @config.ride_verification_url).render
         return Result.new(success: result.success?, estado: result.estado, clave_acceso: result.clave_acceso,
                           numero_autorizacion: result.numero_autorizacion,
                           fecha_autorizacion: result.fecha_autorizacion,

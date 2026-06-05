@@ -26,7 +26,8 @@ module SriFacturacion
       }
     }.freeze
 
-    attr_accessor :ambiente, :cert_path, :cert_password, :max_retries, :retry_delay, :open_timeout, :read_timeout
+    attr_accessor :ambiente, :cert_path, :cert_password, :max_retries, :retry_delay, :open_timeout, :read_timeout,
+                  :ride_verification_url
 
     def initialize
       @ambiente = AMBIENTE_PRUEBAS # PRUEBAS por defecto
@@ -36,6 +37,7 @@ module SriFacturacion
       @retry_delay = 2
       @open_timeout = 15
       @read_timeout = 30
+      @ride_verification_url = nil
     end
 
     def pruebas?
