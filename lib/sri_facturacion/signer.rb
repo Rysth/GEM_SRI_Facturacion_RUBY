@@ -85,7 +85,11 @@ module SriFacturacion
         signing_time: signing_time
       )) { |c| c.noblanks }
 
-      sig_root = sig_doc.root
+      # Anexar primero: con C14N inclusivo, los namespaces en contexto afectan
+      # el digest de SignedProperties/KeyInfo. Si se calculan en sig_doc y luego
+      # se reparenta la firma, el SRI recalcula otro digest y devuelve FIRMA INVALIDA.
+      root.add_child(sig_doc.root)
+      sig_root = root.at_xpath("ds:Signature", NS)
 
       keyinfo = at(sig_root, "ds:KeyInfo")
       signed_props = at(sig_root, "ds:Object/etsi:QualifyingProperties/etsi:SignedProperties")
@@ -102,9 +106,7 @@ module SriFacturacion
       signature_value = base64(key.sign(OpenSSL::Digest::SHA1.new, canonicalize(signed_info)))
       set_text(at(sig_root, "ds:SignatureValue"), signature_value)
 
-      # 4) Anexar la firma al comprobante y serializar. add_child reparenta el nodo
-      # de sig_doc al documento del comprobante (Nokogiri lo adopta automáticamente).
-      root.add_child(sig_root)
+      # 4) Serializar el documento final ya firmado.
       doc.to_xml(indent: 0, save_with: Nokogiri::XML::Node::SaveOptions::AS_XML)
     end
 
@@ -273,7 +275,11 @@ module SriFacturacion
     end
 
     def self.compute_reference_digest(target, transforms)
-      node = target.dup
+      node = if transforms.include?(ENVELOPED)
+        Nokogiri::XML(target.to_xml) { |c| c.noblanks }.root
+      else
+        target
+      end
       # 1) Aplicar transforms en orden
       transforms.each do |t|
         case t
@@ -284,12 +290,9 @@ module SriFacturacion
         end
       end
 
-      # 2) Serializar y calcular digest
-      if transforms.include?(C14N_ALG)
-        tree_bytes = node.canonicalize(Nokogiri::XML::XML_C14N_1_0)
-      else
-        tree_bytes = node.to_xml(indent: 0, save_with: 0)
-      end
+      # 2) Serializar y calcular digest. La gema calcula todos los DigestValue
+      # sobre C14N 1.0: comprobante, SignedProperties y KeyInfo.
+      tree_bytes = node.canonicalize(Nokogiri::XML::XML_C14N_1_0)
 
       Base64.strict_encode64(OpenSSL::Digest::SHA1.digest(tree_bytes))
     end

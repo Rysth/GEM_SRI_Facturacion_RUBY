@@ -58,4 +58,8 @@ RSpec.describe SriFacturacion::Signer do
     actual = Base64.strict_encode64(OpenSSL::Digest::SHA1.digest(keyinfo.canonicalize(Nokogiri::XML::XML_C14N_1_0)))
     expect(actual).to eq(expected)
   end
+
+  it "verifica localmente todos los digests y SignatureValue del XML final" do
+    expect(described_class.verify_signature(signed, signer)).to be(true)
+  end
 end
