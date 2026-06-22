@@ -50,6 +50,20 @@ RSpec.describe SriFacturacion::Signer do
     expect(actual).to eq(expected)
   end
 
+  it "NO declara xmlns:etsi en ds:Signature (evita FIRMA INVALIDA del SRI, error 39)" do
+    sig = doc.at_xpath("//ds:Signature", ns)
+    # El namespace etsi debe declararse en QualifyingProperties, no en la raíz de la firma,
+    # para que SignedInfo/KeyInfo no hereden un xmlns:etsi sin usar (rompe la C14N del SRI).
+    expect(sig.namespace_definitions.map(&:prefix)).not_to include("etsi")
+    expect(doc.at_xpath("//etsi:QualifyingProperties", ns).namespace_definitions.map(&:prefix)).to include("etsi")
+  end
+
+  it "la C14N del SignedInfo no incluye xmlns:etsi (debe coincidir con el validador del SRI)" do
+    signed_info = doc.at_xpath("//ds:SignedInfo", ns)
+    c14n = signed_info.canonicalize(Nokogiri::XML::XML_C14N_1_0)
+    expect(c14n).not_to include("xmlns:etsi")
+  end
+
   it "el digest del KeyInfo coincide con su canonicalización" do
     ref_uri = doc.at_xpath("//ds:KeyInfo", ns)["Id"]
     ref = doc.xpath("//ds:SignedInfo/ds:Reference", ns).find { |r| r["URI"] == "##{ref_uri}" }

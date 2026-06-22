@@ -133,8 +133,15 @@ module SriFacturacion
       issuer = certificate.issuer.to_s(OpenSSL::X509::Name::RFC2253)
       serial = certificate.serial.to_s
 
+      # IMPORTANTE: el namespace `etsi` se declara en <etsi:QualifyingProperties>, NO en
+      # <ds:Signature>. Si se declara en la raíz de la firma, nodos como <ds:SignedInfo> y
+      # <ds:KeyInfo> heredan un `xmlns:etsi` que NO usan. La C14N inclusiva de Nokogiri (libxml2)
+      # lo emite en el ápice, pero el validador del SRI (Apache Santuario) lo omite por no estar
+      # visiblemente utilizado, produciendo bytes distintos al canonicalizar el SignedInfo => la
+      # verificación RSA del SignatureValue falla con "FIRMA INVALIDA" (error 39). Declararlo aquí
+      # mantiene la C14N de Nokogiri y la del SRI idénticas. No mover `xmlns:etsi` a <ds:Signature>.
       <<~XML
-        <ds:Signature xmlns:ds="#{DS}" xmlns:etsi="#{ETSI}" Id="#{ids[:signature]}">
+        <ds:Signature xmlns:ds="#{DS}" Id="#{ids[:signature]}">
           <ds:SignedInfo Id="#{ids[:signed_info]}">
             <ds:CanonicalizationMethod Algorithm="#{C14N_ALG}"></ds:CanonicalizationMethod>
             <ds:SignatureMethod Algorithm="#{RSA_SHA1}"></ds:SignatureMethod>
@@ -168,7 +175,7 @@ module SriFacturacion
             </ds:KeyValue>
           </ds:KeyInfo>
           <ds:Object Id="#{ids[:object]}">
-            <etsi:QualifyingProperties Target="##{ids[:signature]}">
+            <etsi:QualifyingProperties xmlns:etsi="#{ETSI}" Target="##{ids[:signature]}">
               <etsi:SignedProperties Id="#{ids[:signed_props]}">
                 <etsi:SignedSignatureProperties>
                   <etsi:SigningTime>#{signing_time}</etsi:SigningTime>
