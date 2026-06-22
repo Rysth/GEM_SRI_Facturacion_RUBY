@@ -13,7 +13,7 @@ module SriFacturacion
   #   - SignatureMethod  : RSA-SHA1
   #   - DigestMethod     : SHA-1
   #   - Canonicalización : C14N 1.0 (inclusive)
-  #   - Transform        : enveloped-signature sobre la referencia #comprobante
+  #   - Transform        : enveloped-signature + C14N sobre la referencia #comprobante
   #   - QualifyingProperties / SignedProperties (XAdES) con SigningCertificate y DataObjectFormat
   #
   # Port estructural de XmlSignerService#signXml. La firma se ANEXA como hijo del nodo raíz
@@ -126,8 +126,8 @@ module SriFacturacion
     end
 
     def signature_template(ids:, ref_uri:, digest_comprobante:, cert_b64:, cert_digest:, signing_time:)
-      modulus = base64(certificate.public_key.n.to_s(2))
-      exponent = base64(certificate.public_key.e.to_s(2))
+      modulus = base64(OpenSSL::BN.new(certificate.public_key.n).to_s(2))
+      exponent = base64(OpenSSL::BN.new(certificate.public_key.e).to_s(2))
       issuer = certificate.issuer.to_s(OpenSSL::X509::Name::RFC2253)
       serial = certificate.serial.to_s
 
@@ -147,6 +147,7 @@ module SriFacturacion
             <ds:Reference Id="#{ids[:reference_id]}" URI="##{ref_uri}">
               <ds:Transforms>
                 <ds:Transform Algorithm="#{ENVELOPED}"></ds:Transform>
+                <ds:Transform Algorithm="#{C14N_ALG}"></ds:Transform>
               </ds:Transforms>
               <ds:DigestMethod Algorithm="#{SHA1_ALG}"></ds:DigestMethod>
               <ds:DigestValue>#{digest_comprobante}</ds:DigestValue>
@@ -223,5 +224,72 @@ module SriFacturacion
     def base64(bytes)
       Base64.strict_encode64(bytes)
     end
-  end
-end
+
+    # Verifica internamente la firma del XML firmado (autodiagnóstico).
+    # Devuelve true si todos los digests de referencia y la firma RSA son válidos.
+    def self.verify_signature(signed_xml, signer = nil)
+      doc = Nokogiri::XML(signed_xml) { |c| c.noblanks }
+      root = doc.root
+      return false unless root
+
+      sig_node = root.at_xpath("ds:Signature", NS)
+      return false unless sig_node
+
+      # 1) Verificar cada Reference
+      sig_node.xpath("ds:SignedInfo/ds:Reference", NS).each do |ref|
+        uri = ref["URI"]
+        expected = ref.at_xpath("ds:DigestValue", NS)&.text
+        next unless uri && uri.start_with?("#") && expected
+
+        id = uri[1..]
+        target = if id == (root["id"] || root["Id"])
+          root
+        else
+          doc.at_xpath("//*[@Id='#{id}']") || doc.at_xpath("//*[@id='#{id}']")
+        end
+        return false unless target
+
+        transforms = ref.xpath("ds:Transforms/ds:Transform", NS).map { |t| t["Algorithm"] }
+        actual_digest = compute_reference_digest(target, transforms)
+
+        unless actual_digest == expected
+          warn "[Signer.verify] Digest mismatch para #{uri}: esperado=#{expected}, calculado=#{actual_digest}"
+          return false
+        end
+      end
+
+      # 2) Verificar SignatureValue (RSA-SHA1)
+      if signer
+        signed_info = sig_node.at_xpath("ds:SignedInfo", NS)
+        signature_value = Base64.strict_decode64(sig_node.at_xpath("ds:SignatureValue", NS)&.text.to_s)
+        c14n_si = signed_info.canonicalize(Nokogiri::XML::XML_C14N_1_0)
+        return signer.certificate.public_key.verify(OpenSSL::Digest::SHA1.new, signature_value, c14n_si)
+      end
+
+      true
+    rescue StandardError => e
+      warn "[Signer.verify] Error verificando firma: #{e.class} #{e.message}"
+      false
+    end
+
+    def self.compute_reference_digest(target, transforms)
+      node = target.dup
+      # 1) Aplicar transforms en orden
+      transforms.each do |t|
+        case t
+        when ENVELOPED
+          node.xpath(".//ds:Signature", NS).each(&:remove)
+        when C14N_ALG
+          # Ya canonicalizaremos al final
+        end
+      end
+
+      # 2) Serializar y calcular digest
+      if transforms.include?(C14N_ALG)
+        tree_bytes = node.canonicalize(Nokogiri::XML::XML_C14N_1_0)
+      else
+        tree_bytes = node.to_xml(indent: 0, save_with: 0)
+      end
+
+      Base64.strict_encode64(OpenSSL::Digest::SHA1.digest(tree_bytes))
+    end
