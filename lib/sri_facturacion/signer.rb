@@ -293,3 +293,5 @@ module SriFacturacion
 
       Base64.strict_encode64(OpenSSL::Digest::SHA1.digest(tree_bytes))
     end
+  end
+end
