@@ -12,11 +12,13 @@ module SriFacturacion
     FACTURA_VERSION = "1.1.0"
     COD_DOC_FACTURA = "01"
 
-    def initialize(factura, clave_acceso:, ambiente:, tipo_emision: "1")
+    # info_extra: campos adicionales que agrega el sistema (p. ej. RUCProveedorSistema).
+    def initialize(factura, clave_acceso:, ambiente:, tipo_emision: "1", info_extra: [])
       @factura = factura
       @clave_acceso = clave_acceso
       @ambiente = ambiente.to_s
       @tipo_emision = tipo_emision.to_s
+      @info_extra = Array(info_extra)
     end
 
     def build
@@ -101,9 +103,10 @@ module SriFacturacion
             end
           end
 
-          unless Array(f.info_adicional).empty?
+          campos = Array(f.info_adicional) + @info_extra
+          unless campos.empty?
             xml.infoAdicional do
-              f.info_adicional.each do |campo|
+              campos.each do |campo|
                 xml.campoAdicional(campo[:valor] || campo["valor"], nombre: campo[:nombre] || campo["nombre"])
               end
             end

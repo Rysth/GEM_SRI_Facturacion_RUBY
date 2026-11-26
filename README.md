@@ -23,14 +23,14 @@ En el `Gemfile`:
 # Por path local
 gem "sri_facturacion", path: "vendor/gems/sri_facturacion"
 
-# O por git
-gem "sri_facturacion", git: "https://github.com/rysthdesign/sri_facturacion"
+# O por git (fijando la versión)
+gem "sri_facturacion", git: "https://github.com/Rysth/GEM_SRI_Facturacion_RUBY", tag: "v0.2.0"
 
 # O publicada en RubyGems
 gem "sri_facturacion"
 ```
 
-Requiere **Ruby >= 3.1**. Dependencias: `nokogiri`, `prawn`, `prawn-table`, `rqrcode`, `bigdecimal`.
+Requiere **Ruby >= 3.1**. Dependencias: `nokogiri`, `prawn`, `prawn-table`, `rqrcode`, `bigdecimal`, `base64`.
 
 ## Configuración
 
@@ -129,6 +129,35 @@ File.binwrite("ride.pdf", pdf)
 ```ruby
 xml = SriFacturacion::Client.new.preview_xml(factura)
 ```
+
+## Paso a paso (sistemas con cola de trabajos)
+
+Para no perder nunca un comprobante, guarde la clave y el XML firmado **antes** de
+enviarlos; envíe y consulte la autorización desde un job con reintentos:
+
+```ruby
+signer = SriFacturacion::Signer.from_p12(p12_bytes, password) # desde memoria
+signer.expired?                     # => false
+signer.certificate_info             # => { subject:, issuer:, ruc:, cedula:, expires_at: }
+signer.belongs_to?("1712345678001") # => true (persona natural: cédula + 001)
+
+config = SriFacturacion::Configuration.new.tap do |c|
+  c.ambiente = "1"
+  c.proveedor_ruc = "1790000000001" # RUCProveedorSistema en infoAdicional
+  c.ride_footer = "RIDE generado por Mi Sistema"
+end
+client = SriFacturacion::Client.new(config: config, signer: signer)
+
+firmado = client.firmar(factura_o_nota_credito)   # { clave_acceso:, xml_firmado: } (sin red)
+# ...guardar firmado en la base de datos...
+client.recepcion(firmado[:xml_firmado], firmado[:clave_acceso]) # { estado: "RECIBIDA" | "DEVUELTA", mensajes: }
+client.autorizacion(firmado[:clave_acceso])       # { estado: "AUTORIZADO" | "NO AUTORIZADO" | nil, ... }
+pdf = client.ride_pdf(comprobante, clave_acceso: firmado[:clave_acceso], numero_autorizacion: "...")
+```
+
+El ambiente de `recepcion` y `autorizacion` sale de la clave de acceso, no de la configuración.
+`Detalle` acepta `precio_total_sin_impuesto` e `Impuesto` un `valor` explícito, para enviar
+exactamente lo que se cobró.
 
 ## Nota de crédito (comprobante 04)
 

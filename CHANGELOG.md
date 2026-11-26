@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-11-26
+
+### Added
+- `Signer.from_p12(bytes, password)`: abre la firma desde memoria y elige el certificado
+  de la clave privada cuando el archivo trae la cadena de la CA.
+- `Signer#certificate_info`, `#expires_at`, `#expired?` y `#belongs_to?(ruc)`.
+- `Client#firmar`, `#recepcion`, `#autorizacion` y `#ride_pdf`: emisión paso a paso para
+  jobs en segundo plano (el XML firmado se guarda antes de enviar). El ambiente sale de la clave.
+- `config.proveedor_ruc`: agrega `RUCProveedorSistema` en infoAdicional (NAC-DGERCGC26-00000027).
+- RIDE de **nota de crédito** (documento modificado y motivo) y pie configurable (`config.ride_footer`).
+
+### Fixed
+- Ruby 3.4: `base64` declarado como dependencia (ya no viene por defecto).
+- Los mensajes del SRI ya no incluyen entradas vacías del `<mensaje>` interno.
+
 ## [0.1.0] - 2026-05-31
 
 ### Added

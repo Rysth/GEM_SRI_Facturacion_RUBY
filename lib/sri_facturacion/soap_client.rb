@@ -137,7 +137,8 @@ module SriFacturacion
     end
 
     def extract_mensajes(doc)
-      doc.xpath("//mensaje").map do |m|
+      # <mensaje> contiene otro <mensaje> con el texto: solo los que traen identificador.
+      doc.xpath("//mensaje[identificador]").map do |m|
         {
           identificador: m.at_xpath("identificador")&.text,
           mensaje: m.at_xpath("mensaje")&.text,

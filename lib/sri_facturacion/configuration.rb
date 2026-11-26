@@ -9,6 +9,8 @@ module SriFacturacion
   #     c.cert_password = "clave"
   #     c.max_retries   = 3
   #     c.retry_delay   = 2              # segundos entre reintentos de autorización
+  #     c.proveedor_ruc = "1790000000001" # RUC del proveedor del sistema (NAC-DGERCGC26-00000027)
+  #     c.ride_footer   = "RIDE generado por Mi Sistema"
   #   end
   class Configuration
     AMBIENTE_PRUEBAS = "1"
@@ -26,8 +28,10 @@ module SriFacturacion
       }
     }.freeze
 
+    DEFAULT_RIDE_FOOTER = "RIDE generado por RysthDesign  ·  www.rysthdesign.com"
+
     attr_accessor :ambiente, :cert_path, :cert_password, :max_retries, :retry_delay, :open_timeout, :read_timeout,
-                  :ride_verification_url
+                  :ride_verification_url, :proveedor_ruc, :ride_footer
 
     def initialize
       @ambiente = AMBIENTE_PRUEBAS # PRUEBAS por defecto
@@ -38,6 +42,8 @@ module SriFacturacion
       @open_timeout = 15
       @read_timeout = 30
       @ride_verification_url = nil
+      @proveedor_ruc = nil
+      @ride_footer = DEFAULT_RIDE_FOOTER
     end
 
     def pruebas?

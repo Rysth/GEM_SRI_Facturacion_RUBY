@@ -33,9 +33,12 @@ module SriFacturacion
       "21" => "Endoso de titulos"
     }.freeze
 
+    # factura: una Models::Factura o una Models::NotaCredito.
     def initialize(factura, clave_acceso:, numero_autorizacion: nil, fecha_autorizacion: nil, ambiente: "1",
-                   verification_url: nil, qr_content: nil)
+                   verification_url: nil, qr_content: nil, footer: nil)
       @factura = factura
+      @nota_credito = factura.is_a?(Models::NotaCredito)
+      @footer = footer || Configuration::DEFAULT_RIDE_FOOTER
       @clave_acceso = clave_acceso.to_s
       @numero_autorizacion = numero_autorizacion
       @fecha_autorizacion = fecha_autorizacion
@@ -102,7 +105,7 @@ module SriFacturacion
         pdf.move_down 12
         pdf.indent(13, 13) do
           pdf.fill_color DARK
-          pdf.text "FACTURA", size: 19, style: :bold, align: :right
+          pdf.text(@nota_credito ? "NOTA DE CREDITO" : "FACTURA", size: @nota_credito ? 15 : 19, style: :bold, align: :right)
           pdf.fill_color MUTED
           pdf.text "No. #{number}", size: 10, style: :bold, align: :right
           pdf.move_down 10
@@ -205,7 +208,7 @@ module SriFacturacion
 
     def draw_details_table(pdf)
       pdf.fill_color DARK
-      pdf.text "DETALLE DE LA FACTURA", size: 9, style: :bold
+      pdf.text(@nota_credito ? "DETALLE DE LA NOTA DE CREDITO" : "DETALLE DE LA FACTURA", size: 9, style: :bold)
       pdf.move_down 6
 
       table_width = pdf.bounds.width
@@ -252,6 +255,11 @@ module SriFacturacion
       top = pdf.cursor
 
       pdf.bounding_box([0, top], width: payments_width) do
+        if @nota_credito
+          draw_modified_document(pdf, payments_width)
+          next
+        end
+
         section_label(pdf, "FORMA DE PAGO")
         payment_rows = @factura.pagos.map do |payment|
           [payment_label(payment.forma_pago), money(payment.total)]
@@ -294,6 +302,20 @@ module SriFacturacion
       pdf.move_cursor_to [pdf.cursor, top - 88].min
     end
 
+    # Nota de crédito: qué factura modifica y por qué.
+    def draw_modified_document(pdf, width)
+      section_label(pdf, "DOCUMENTO MODIFICADO")
+      rows = [
+        ["Comprobante", "#{@factura.cod_doc_modificado == "01" ? "Factura" : "Documento"} #{@factura.num_doc_modificado}"],
+        ["Fecha de emision", format_fecha(@factura.fecha_emision_doc_sustento)],
+        ["Motivo", @factura.motivo.to_s]
+      ]
+      pdf.table(rows, width: width, cell_style: { size: 8, padding: [6, 7], border_width: 0.35, border_color: BORDER },
+                      column_widths: [92, width - 92]) do
+        columns(0).font_style = :bold
+      end
+    end
+
     def draw_additional_info(pdf)
       return unless @factura.info_adicional.respond_to?(:any?) && @factura.info_adicional.any?
 
@@ -325,8 +347,7 @@ module SriFacturacion
             pdf.stroke_horizontal_rule
             pdf.move_down 6
             pdf.fill_color MUTED
-            pdf.text "RIDE generado por StockManager by RysthDesign  ·  www.rysthdesign.com",
-                     size: 7, align: :center
+            pdf.text @footer.to_s, size: 7, align: :center
           end
         end
       end
@@ -384,7 +405,7 @@ module SriFacturacion
       return verification_url if present?(@verification_url)
 
       [
-        "RIDE FACTURA",
+        @nota_credito ? "RIDE NOTA DE CREDITO" : "RIDE FACTURA",
         "RUC=#{@factura.emisor.ruc}",
         "COMPROBANTE=#{document_number}",
         "CLAVE=#{@clave_acceso}",

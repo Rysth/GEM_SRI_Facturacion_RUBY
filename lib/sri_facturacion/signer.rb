@@ -41,11 +41,50 @@ module SriFacturacion
     def self.load(path, password)
       raise SignatureError, "El certificado no existe: #{path}" unless File.exist?(path)
 
+      from_p12(File.binread(path), password)
+    end
+
+    # Carga el .p12 desde memoria (p. ej. guardado cifrado en una base de datos).
+    # Si el archivo trae la cadena de la entidad certificadora, usa el certificado
+    # que corresponde a la clave privada (no el de la CA).
+    def self.from_p12(bytes, password)
       load_legacy_provider
-      p12 = OpenSSL::PKCS12.new(File.binread(path), password.to_s)
-      new(key: p12.key, certificate: p12.certificate)
-    rescue OpenSSL::PKCS12::PKCS12Error => e
-      raise SignatureError, "No se pudo abrir el .p12 (¿clave incorrecta?): #{e.message}"
+      p12 = OpenSSL::PKCS12.new(bytes.to_s.b, password.to_s)
+      raise SignatureError, "El archivo .p12 no trae la clave privada" unless p12.key
+
+      candidates = [p12.certificate, *Array(p12.ca_certs)].compact
+      certificate = candidates.find { |cert| cert.check_private_key(p12.key) } || p12.certificate
+      new(key: p12.key, certificate: certificate)
+    rescue OpenSSL::PKCS12::PKCS12Error
+      raise SignatureError, "No se pudo abrir la firma .p12: la contraseña no es correcta o el archivo no es una firma electrónica"
+    end
+
+    def expires_at
+      certificate.not_after
+    end
+
+    def expired?(now = Time.now)
+      now > certificate.not_after || now < certificate.not_before
+    end
+
+    # Datos del certificado para mostrar y validar: titular, RUC o cédula, vencimiento.
+    # Las entidades del Ecuador guardan el RUC/cédula en extensiones propias; se
+    # busca en el sujeto y en todas las extensiones.
+    def certificate_info
+      texts = [certificate.subject.to_s, *certificate.extensions.map { |ext| ext.value.to_s }]
+      numbers = texts.flat_map { |text| text.scan(/(?<!\d)\d{10}(?:\d{3})?(?!\d)/) }
+      ruc = numbers.find { |number| number.length == 13 && number.end_with?("001") }
+      cedula = numbers.find { |number| number.length == 10 } || ruc&.slice(0, 10)
+      common_name = certificate.subject.to_a.find { |name, _, _| name == "CN" }&.at(1)
+      { subject: common_name || certificate.subject.to_s, issuer: certificate.issuer.to_s,
+        ruc: ruc, cedula: cedula, expires_at: expires_at }
+    end
+
+    # ¿El certificado pertenece a este RUC? (persona natural: su cédula + 001).
+    def belongs_to?(ruc)
+      info = certificate_info
+      ruc = ruc.to_s
+      info[:ruc] == ruc || (!info[:cedula].nil? && ruc == "#{info[:cedula]}001")
     end
 
     def self.load_legacy_provider

@@ -31,18 +31,15 @@ module SriFacturacion
       )
 
       xml = XmlBuilder.new(factura, clave_acceso: clave_acceso, ambiente: ambiente,
-                                    tipo_emision: factura.tipo_emision).build
+                                    tipo_emision: factura.tipo_emision, info_extra: info_extra(factura)).build
 
       xml_firmado = signer.sign(xml)
 
       result = @soap_client.enviar_y_autorizar(xml_firmado, clave_acceso, ambiente: ambiente)
 
       if result.autorizado? && generar_ride
-        pdf = Ride.new(factura, clave_acceso: clave_acceso,
-                                 numero_autorizacion: result.numero_autorizacion,
-                                 fecha_autorizacion: result.fecha_autorizacion,
-                                 ambiente: ambiente,
-                                 verification_url: @config.ride_verification_url).render
+        pdf = ride_pdf(factura, clave_acceso: clave_acceso, numero_autorizacion: result.numero_autorizacion,
+                                fecha_autorizacion: result.fecha_autorizacion)
         return Result.new(success: result.success?, estado: result.estado, clave_acceso: result.clave_acceso,
                           numero_autorizacion: result.numero_autorizacion,
                           fecha_autorizacion: result.fecha_autorizacion,
@@ -71,11 +68,54 @@ module SriFacturacion
       )
 
       xml = NotaCreditoXmlBuilder.new(nota_credito, clave_acceso: clave_acceso, ambiente: ambiente,
-                                                    tipo_emision: nota_credito.tipo_emision).build
+                                                    tipo_emision: nota_credito.tipo_emision,
+                                                    info_extra: info_extra(nota_credito)).build
 
       xml_firmado = signer.sign(xml)
 
       @soap_client.enviar_y_autorizar(xml_firmado, clave_acceso, ambiente: ambiente)
+    end
+
+    # ── Paso a paso (para un job en segundo plano) ──────────────────────
+    #
+    # El sistema guarda la clave y el XML firmado ANTES de enviar, así un corte
+    # de red nunca pierde el comprobante:
+    #
+    #   firmado = client.firmar(factura)          # sin red
+    #   client.recepcion(firmado[:xml_firmado])   # { estado: "RECIBIDA" | "DEVUELTA", mensajes: }
+    #   client.autorizacion(firmado[:clave_acceso]) # { estado: "AUTORIZADO" | "NO AUTORIZADO" | nil, ... }
+
+    # Clave de acceso + XML + firma, para una factura o una nota de crédito.
+    def firmar(comprobante, codigo_numerico: nil)
+      ambiente = @config.ambiente.to_s
+      nota = comprobante.is_a?(Models::NotaCredito)
+      clave_acceso = AccessKey.generate(
+        fecha_emision: comprobante.fecha_emision, ruc: comprobante.emisor.ruc,
+        establecimiento: comprobante.emisor.establecimiento, punto_emision: comprobante.emisor.punto_emision,
+        secuencial: comprobante.secuencial, ambiente: ambiente, tipo_emision: comprobante.tipo_emision,
+        tipo_comprobante: nota ? AccessKey::NOTA_CREDITO : AccessKey::FACTURA, codigo_numerico: codigo_numerico
+      )
+      builder = nota ? NotaCreditoXmlBuilder : XmlBuilder
+      xml = builder.new(comprobante, clave_acceso: clave_acceso, ambiente: ambiente,
+                                     tipo_emision: comprobante.tipo_emision, info_extra: info_extra(comprobante)).build
+      { clave_acceso: clave_acceso, xml_firmado: signer.sign(xml) }
+    end
+
+    # Envía el XML firmado a recepción. El ambiente sale de la clave de acceso.
+    def recepcion(xml_firmado, clave_acceso)
+      @soap_client.validar_comprobante(xml_firmado, ambiente: ambiente_de(clave_acceso))
+    end
+
+    # Consulta la autorización. estado nil = el SRI todavía no la procesa.
+    def autorizacion(clave_acceso)
+      @soap_client.autorizar_comprobante(clave_acceso, ambiente: ambiente_de(clave_acceso))
+    end
+
+    # RIDE (PDF) de una factura o nota de crédito ya autorizada.
+    def ride_pdf(comprobante, clave_acceso:, numero_autorizacion: nil, fecha_autorizacion: nil)
+      Ride.new(comprobante, clave_acceso: clave_acceso, numero_autorizacion: numero_autorizacion,
+                            fecha_autorizacion: fecha_autorizacion, ambiente: ambiente_de(clave_acceso),
+                            verification_url: @config.ride_verification_url, footer: @config.ride_footer).render
     end
 
     # Solo construye el XML sin firmar (útil para previsualizar).
@@ -88,7 +128,7 @@ module SriFacturacion
         codigo_numerico: codigo_numerico
       )
       XmlBuilder.new(factura, clave_acceso: clave_acceso, ambiente: ambiente,
-                              tipo_emision: factura.tipo_emision).build
+                              tipo_emision: factura.tipo_emision, info_extra: info_extra(factura)).build
     end
 
     # Solo construye el XML de la nota de crédito sin firmar (útil para previsualizar).
@@ -101,10 +141,28 @@ module SriFacturacion
         tipo_comprobante: AccessKey::NOTA_CREDITO, codigo_numerico: codigo_numerico
       )
       NotaCreditoXmlBuilder.new(nota_credito, clave_acceso: clave_acceso, ambiente: ambiente,
-                                              tipo_emision: nota_credito.tipo_emision).build
+                                              tipo_emision: nota_credito.tipo_emision,
+                                              info_extra: info_extra(nota_credito)).build
     end
 
     private
+
+    PROVEEDOR_CAMPO = "RUCProveedorSistema"
+
+    # Resolución NAC-DGERCGC26-00000027: el RUC del proveedor del sistema va en
+    # infoAdicional, salvo que el comprobante ya lo traiga.
+    def info_extra(comprobante)
+      ruc = @config.proveedor_ruc.to_s.strip
+      return [] unless ruc.match?(/\A\d{13}\z/)
+      return [] if Array(comprobante.info_adicional).any? { |c| (c[:nombre] || c["nombre"]) == PROVEEDOR_CAMPO }
+
+      [{ nombre: PROVEEDOR_CAMPO, valor: ruc }]
+    end
+
+    # Posición 24 de la clave de acceso: 1 pruebas, 2 producción.
+    def ambiente_de(clave_acceso)
+      clave_acceso.to_s[23] || @config.ambiente.to_s
+    end
 
     def signer
       @signer ||= begin

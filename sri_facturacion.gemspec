@@ -20,6 +20,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
 
+  spec.add_dependency "base64", ">= 0.2"
   spec.add_dependency "bigdecimal", "~> 3.1"
   spec.add_dependency "nokogiri", ">= 1.13"
   spec.add_dependency "prawn", ">= 2.4"
