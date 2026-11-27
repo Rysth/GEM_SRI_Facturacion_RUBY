@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-11-26
+
+### Changed
+- RIDE rediseñado: logo del emisor más grande (hasta 170×60), etiquetas completas y con tildes
+  ("Obligado a llevar contabilidad", "Dirección sucursal" solo si difiere de la matriz), R.U.C. en el
+  recuadro del comprobante, emisión "Normal", recuadro del cliente a la medida de sus datos.
+- Totales como el RIDE del SRI: un subtotal por tarifa de IVA (15 %, 0 %, no objeto, exento),
+  descuento solo si lo hay, IVA y valor total.
+- Forma de pago con su plazo ("30 días") y nombres con tildes.
+- Ambiente de pruebas: sello "PRUEBAS · SIN VALIDEZ TRIBUTARIA" en cada página.
+
 ## [0.2.0] - 2026-11-26
 
 ### Added
